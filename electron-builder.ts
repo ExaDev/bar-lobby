@@ -1,5 +1,11 @@
 import { Configuration } from "electron-builder";
 
+// Notarisation is scaffolded but inert until Apple credentials are supplied.
+// Setting APPLE_TEAM_ID (alongside APPLE_ID + APPLE_APP_SPECIFIC_PASSWORD)
+// flips it on; electron-builder reads the credentials from the environment at
+// build time. mac.notarize is a boolean here, so gate on the env var presence.
+const notarizeEnabled = Boolean(process.env["APPLE_TEAM_ID"]);
+
 /**
  * @see https://www.electron.build/configuration
  */
@@ -65,9 +71,8 @@ const config: Configuration = {
         identity: null,
         hardenedRuntime: false,
         gatekeeperAssess: false,
-        // Notarisation stays inert until an Apple Team ID is provided via the
-        // environment/CI secret; without it electron-builder skips notarisation.
-        notarize: process.env["APPLE_TEAM_ID"] ? { teamId: process.env["APPLE_TEAM_ID"] } : false,
+        // Inert without Apple credentials; see notarizeEnabled above.
+        notarize: notarizeEnabled,
         // Ship the bundled patched engine outside the asar so it lands at
         // process.resourcesPath/engine-macos for the first-run install copy.
         extraResources: [{ from: "buildResources/engine-macos", to: "engine-macos" }],
