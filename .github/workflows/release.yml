@@ -6,17 +6,36 @@ name: Release
 
 on:
     push:
+        # Auto-release on every push to the fork's macOS branch (macOS only),
+        # plus full multi-platform releases on deliberate v* version tags.
+        branches:
+            - macos-port
         tags:
             - "v*"
     workflow_dispatch:
 
 jobs:
+    # Branch/dispatch pushes release macOS only (the fork's focus; win/linux are
+    # unverified here). A v* tag releases all three platforms.
+    setup:
+        runs-on: ubuntu-latest
+        outputs:
+            matrix: ${{ steps.matrix.outputs.matrix }}
+        steps:
+            - id: matrix
+              run: |
+                  if [ "${{ github.ref_type }}" = "tag" ]; then
+                    echo 'matrix={"os":["windows-latest","ubuntu-latest","macos-15"]}' >> "$GITHUB_OUTPUT"
+                  else
+                    echo 'matrix={"os":["macos-15"]}' >> "$GITHUB_OUTPUT"
+                  fi
+
     release:
+        needs: setup
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
-            matrix:
-                os: [windows-latest, ubuntu-latest, macos-15]
+            matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
 
         steps:
             - name: Check out Git repository
@@ -83,8 +102,18 @@ jobs:
 
             - name: Electron Build & Publish
               run: |
+                  set -euo pipefail
                   npm run package
-                  npm run release
+                  if [ "${{ github.ref_type }}" = "tag" ]; then
+                    # Deliberate version tag: publish at package.json's version.
+                    npx electron-builder --publish always
+                  else
+                    # Auto-release: unique per-push prerelease version so each
+                    # push creates its own GitHub release (tag v<version>).
+                    VERSION="$(jq -r .version package.json)-macos.${{ github.run_number }}"
+                    echo "Auto-release version: $VERSION"
+                    npx electron-builder --publish always -c.extraMetadata.version="$VERSION"
+                  fi
               env:
                   GITHUB_TOKEN: ${{ secrets.github_token }}
                   # Apple notarisation/signing credentials. Absent today, so
