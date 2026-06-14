@@ -26,7 +26,7 @@ concurrency:
 env:
   UPSTREAM: beyond-all-reason/bar-lobby
   MIRROR_BRANCH: master
-  WORK_BRANCH: macos-port
+  WORK_BRANCH: main
   BUILD_WORKFLOW: release.yml
 
 jobs:

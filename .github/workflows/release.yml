@@ -9,7 +9,7 @@ on:
         # Auto-release all platforms on every push to the fork branch; v* tags
         # do the same at a deliberate (non-prerelease) version.
         branches:
-            - macos-port
+            - main
         tags:
             - "v*"
     workflow_dispatch:
