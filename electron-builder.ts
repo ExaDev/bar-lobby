@@ -48,7 +48,11 @@ const config: Configuration = {
 
     // Windows
     win: {
-        target: ["nsis"],
+        // nsis = installer for direct downloads; zip = portable build for the
+        // Scoop bucket (ExaDev/scoop-bar). nsis keeps its own artifactName
+        // (below); the zip uses this win-level one.
+        target: ["nsis", "zip"],
+        artifactName: "${productName}-${version}-win-${arch}.${ext}",
         extraResources: [
             {
                 from: "buildResources/cacert.pem",

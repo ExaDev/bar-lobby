@@ -6,8 +6,8 @@ name: Release
 
 on:
     push:
-        # Auto-release on every push to the fork's macOS branch (macOS only),
-        # plus full multi-platform releases on deliberate v* version tags.
+        # Auto-release all platforms on every push to the fork branch; v* tags
+        # do the same at a deliberate (non-prerelease) version.
         branches:
             - macos-port
         tags:
@@ -19,27 +19,14 @@ permissions:
     contents: write
 
 jobs:
-    # Branch/dispatch pushes release macOS (DMG) + Linux (AppImage). Windows is
-    # left to deliberate v* tags, which release all three platforms.
-    setup:
-        runs-on: ubuntu-latest
-        outputs:
-            matrix: ${{ steps.matrix.outputs.matrix }}
-        steps:
-            - id: matrix
-              run: |
-                  if [ "${{ github.ref_type }}" = "tag" ]; then
-                    echo 'matrix={"os":["windows-latest","ubuntu-latest","macos-15"]}' >> "$GITHUB_OUTPUT"
-                  else
-                    echo 'matrix={"os":["macos-15","ubuntu-latest"]}' >> "$GITHUB_OUTPUT"
-                  fi
-
+    # Every push releases all three platforms: macOS DMG (cask), Linux AppImage,
+    # Windows zip (scoop) + nsis installer.
     release:
-        needs: setup
         runs-on: ${{ matrix.os }}
         strategy:
             fail-fast: false
-            matrix: ${{ fromJSON(needs.setup.outputs.matrix) }}
+            matrix:
+                os: [windows-latest, ubuntu-latest, macos-15]
 
         steps:
             - name: Check out Git repository
@@ -171,5 +158,70 @@ jobs:
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
                   git add Casks/bar-lobby.rb
+                  git diff --cached --quiet || git commit -m "bar-lobby ${VERSION}"
+                  git push
+
+    # Push the Scoop manifest into the bucket via its own scoped SSH deploy key
+    # (cascade's update-scoop pattern). Regenerates bucket/bar-lobby.json fresh.
+    update-scoop:
+        needs: release
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout bucket via SSH deploy key
+              uses: actions/checkout@v6
+              with:
+                  repository: ExaDev/scoop-bar
+                  ssh-key: ${{ secrets.SCOOP_DEPLOY_KEY }}
+            - name: Update manifest to latest release
+              env:
+                  GH_TOKEN: ${{ github.token }}
+              run: |
+                  set -euo pipefail
+                  TAG=$(gh release list --repo ExaDev/bar-lobby --limit 30 \
+                    --json tagName,isDraft,publishedAt \
+                    --jq '[.[] | select(.isDraft | not) | select(.tagName | startswith("v"))]
+                          | sort_by(.publishedAt) | reverse | .[0].tagName')
+                  VERSION="${TAG#v}"
+                  ASSET="BeyondAllReason-${VERSION}-win-x64.zip"
+                  URL="https://github.com/ExaDev/bar-lobby/releases/download/${TAG}/${ASSET}"
+                  gh release view "$TAG" --repo ExaDev/bar-lobby --json assets \
+                    --jq '.assets[].name' | grep -qx "$ASSET" \
+                    || { echo "::error::$ASSET not on $TAG"; exit 1; }
+                  curl -fsSL --retry 6 --retry-delay 5 --retry-all-errors "$URL" -o /tmp/win.zip
+                  SHA=$(shasum -a 256 /tmp/win.zip | cut -d' ' -f1)
+                  [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256: $SHA"; exit 1; }
+                  cat > bucket/bar-lobby.json <<JSON
+                  {
+                      "version": "${VERSION}",
+                      "description": "Beyond All Reason lobby client (bar-lobby)",
+                      "homepage": "https://github.com/ExaDev/bar-lobby",
+                      "license": {
+                          "url": "https://github.com/ExaDev/bar-lobby/blob/master/LICENSE.md"
+                      },
+                      "architecture": {
+                          "64bit": {
+                              "url": "${URL}",
+                              "hash": "${SHA}"
+                          }
+                      },
+                      "shortcuts": [
+                          ["BeyondAllReason.exe", "Beyond All Reason"]
+                      ],
+                      "checkver": {
+                          "github": "https://github.com/ExaDev/bar-lobby"
+                      },
+                      "autoupdate": {
+                          "architecture": {
+                              "64bit": {
+                                  "url": "https://github.com/ExaDev/bar-lobby/releases/download/v\$version/BeyondAllReason-\$version-win-x64.zip"
+                              }
+                          }
+                      }
+                  }
+                  JSON
+                  python3 -c "import json; json.load(open('bucket/bar-lobby.json'))"
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add bucket/bar-lobby.json
                   git diff --cached --quiet || git commit -m "bar-lobby ${VERSION}"
                   git push
