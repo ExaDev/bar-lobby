@@ -46,9 +46,12 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            # Fetch the engine from ExaDev/RecoilEngine's latest GitHub Release
-            # (published by macos-build-gpu.yml on push to main). Both repos are
-            # public, so the default GITHUB_TOKEN reads the release — no PAT.
+            # Fetch the engine from ExaDev/RecoilEngine pinned by tag in
+            # buildResources/engine-release.txt. That file is written by
+            # RecoilEngine's macos-build-gpu.yml (bump-lobby job) via a deploy
+            # key on each engine build, so the lobby tracks an explicit engine
+            # version — no "latest" race. Both repos are public, so the default
+            # GITHUB_TOKEN reads the release asset; no PAT.
             - name: Download engine release asset from ExaDev/RecoilEngine
               if: runner.os == 'macOS'
               env:
@@ -56,15 +59,12 @@ jobs:
               run: |
                   set -euo pipefail
                   mkdir -p /tmp/engine-artifact
-                  TAG=$(gh release list --repo ExaDev/RecoilEngine --limit 50 \
-                    --json tagName,createdAt \
-                    --jq '[.[] | select(.tagName | startswith("engine-macos-arm64-"))]
-                          | sort_by(.createdAt) | reverse | .[0].tagName')
-                  if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-                    echo "::error::No engine-macos-arm64-* release found on ExaDev/RecoilEngine"
+                  TAG="$(tr -d '[:space:]' < buildResources/engine-release.txt)"
+                  if [ -z "$TAG" ]; then
+                    echo "::error::buildResources/engine-release.txt is empty or missing"
                     exit 1
                   fi
-                  echo "Using engine release $TAG"
+                  echo "Using pinned engine release $TAG"
                   gh release download "$TAG" --repo ExaDev/RecoilEngine \
                     --pattern 'engine-macos-arm64-*.tar.gz' --dir /tmp/engine-artifact
 
