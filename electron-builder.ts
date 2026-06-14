@@ -21,7 +21,9 @@ const config: Configuration = {
             ext: "sdfz",
             description: "BAR Replay File",
             role: "Viewer",
-            icon: "icon.ico",
+            // Base name without extension so electron-builder resolves the
+            // platform-appropriate icon: icon.ico on Windows, icon.icns on macOS.
+            icon: "icon",
             name: "SDFZ NAME HERE",
         },
     ],
@@ -52,6 +54,27 @@ const config: Configuration = {
         category: "Game",
     },
     appImage: {},
+
+    // macOS (Apple Silicon)
+    mac: {
+        target: [{ target: "dmg", arch: ["arm64"] }],
+        category: "public.app-category.games",
+        // Ad-hoc signing for now (equivalent to `codesign --sign -`). Switch to
+        // a Developer ID identity + hardenedRuntime + entitlements once signing
+        // credentials are available.
+        identity: null,
+        hardenedRuntime: false,
+        gatekeeperAssess: false,
+        // Notarisation stays inert until an Apple Team ID is provided via the
+        // environment/CI secret; without it electron-builder skips notarisation.
+        notarize: process.env["APPLE_TEAM_ID"] ? { teamId: process.env["APPLE_TEAM_ID"] } : false,
+        // Ship the bundled patched engine outside the asar so it lands at
+        // process.resourcesPath/engine-macos for the first-run install copy.
+        extraResources: [{ from: "buildResources/engine-macos", to: "engine-macos" }],
+    },
+    dmg: {
+        artifactName: "${productName}-${version}-mac-arm64.${ext}",
+    },
 };
 
 export default config;
