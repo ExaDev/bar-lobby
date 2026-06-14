@@ -161,6 +161,12 @@ export class EngineContentAPI extends AbstractContentAPI<string, EngineVersion> 
     protected async parseAis(engineVersion: string): Promise<EngineAI[]> {
         const ais: EngineAI[] = [];
         const aisPath = path.join(this.engineDirs, engineVersion, "AI", "Skirmish");
+        // An engine may ship without bundled skirmish AIs (e.g. the macOS
+        // bundle), which is a legitimate state: return no AIs rather than
+        // letting ENOENT propagate as a spurious "engine download failed".
+        if (!fs.existsSync(aisPath)) {
+            return ais;
+        }
         const aiDirs = await fs.promises.readdir(aisPath);
         for (const aiDir of aiDirs) {
             try {
