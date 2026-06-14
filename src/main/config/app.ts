@@ -79,14 +79,16 @@ function getDefaultLocations(): { state: string; assets: string } {
         };
     }
     if (process.platform === "darwin") {
-        // macOS has no separate state vs data split that the engine respects,
-        // so both live under ~/Library/Application Support/<APP_NAME>. State
-        // sits at the app-support root to line up with the `userData` path
-        // Electron itself uses (set via app.setPath("userData", …) below).
-        const appSupport = path.join(homedir(), "Library", "Application Support");
+        // macOS has no separate state/data roots like XDG, so keep both under
+        // ~/Library/Application Support/<APP_NAME> — but as SIBLINGS, not
+        // nested. validateAssetsPath (paths.service.ts) rejects an assets dir
+        // inside the state dir, so state must not be the parent of assets
+        // (a previous layout put state at the app-support root, which made the
+        // default assets path fail validation and crashed Initial Setup).
+        const base = path.join(homedir(), "Library", "Application Support", APP_NAME);
         return {
-            assets: path.join(appSupport, APP_NAME, "assets"),
-            state: path.join(appSupport, APP_NAME),
+            assets: path.join(base, "assets"),
+            state: path.join(base, "state"),
         };
     }
 
