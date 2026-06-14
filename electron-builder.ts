@@ -27,9 +27,10 @@ const config: Configuration = {
             ext: "sdfz",
             description: "BAR Replay File",
             role: "Viewer",
-            // Base name without extension so electron-builder resolves the
-            // platform-appropriate icon: icon.ico on Windows, icon.icns on macOS.
-            icon: "icon",
+            // NOTE: no per-association icon. Pointing it at the app's icon.icns
+            // made electron-builder link the same file into the .app twice
+            // (app icon + association icon) and race to EEXIST on macOS. Omitting
+            // it lets the association inherit the app icon: one link, no race.
             name: "SDFZ NAME HERE",
         },
     ],
