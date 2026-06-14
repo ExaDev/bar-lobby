@@ -12,6 +12,21 @@ import { homedir } from "os";
 // and in workaround in installer.nsh.
 export const APP_NAME = "BeyondAllReason";
 
+// Name of the shared content store used by the chobby launcher. On macOS the
+// engine and downloaded game/maps/pool content live here so the lobby and the
+// chobby launcher share a single copy (chobby uses this exact path). It is
+// deliberately distinct from APP_NAME ("BeyondAllReason"): the lobby keeps its
+// own config/state/logs under APP_NAME, only the bulky shared content moves to
+// SHARED_CONTENT_NAME ("Beyond All Reason", with spaces, matching chobby).
+//
+// CONCURRENT-WRITE CAVEAT: because the lobby and chobby share this store, two
+// processes may write here at once (e.g. both downloading or extracting engine
+// or game content simultaneously). There is no cross-process lock. Running both
+// clients concurrently while either is fetching content can interleave writes
+// and corrupt the shared tree. Treat the shared store as single-writer at a
+// time; do not run a content download in both clients at once.
+export const SHARED_CONTENT_NAME = "Beyond All Reason";
+
 /**
  * The function returns default base directories for the application data.
  *
@@ -79,16 +94,23 @@ function getDefaultLocations(): { state: string; assets: string } {
         };
     }
     if (process.platform === "darwin") {
-        // macOS has no separate state/data roots like XDG, so keep both under
-        // ~/Library/Application Support/<APP_NAME> — but as SIBLINGS, not
-        // nested. validateAssetsPath (paths.service.ts) rejects an assets dir
-        // inside the state dir, so state must not be the parent of assets
-        // (a previous layout put state at the app-support root, which made the
-        // default assets path fail validation and crashed Initial Setup).
-        const base = path.join(homedir(), "Library", "Application Support", APP_NAME);
+        // macOS has no separate state/data roots like XDG. The lobby keeps its
+        // own config/state/logs under ~/Library/Application Support/<APP_NAME>,
+        // but the engine and downloaded game/maps/pool content go into the
+        // SHARED content store at ~/Library/Application Support/<SHARED_CONTENT_NAME>
+        // so the lobby and the chobby launcher share a single copy (chobby uses
+        // this exact path). See the SHARED_CONTENT_NAME concurrent-write caveat.
+        //
+        // The assets dir is the shared store root itself (not a nested "assets"
+        // subdir) because chobby reads engine/games/maps/pool directly under the
+        // store root. validateAssetsPath (paths.service.ts) rejects an assets
+        // dir nested inside the state dir; here the two roots are independent
+        // top-level directories, so that check is satisfied.
+        const stateBase = path.join(homedir(), "Library", "Application Support", APP_NAME);
+        const sharedContentBase = path.join(homedir(), "Library", "Application Support", SHARED_CONTENT_NAME);
         return {
-            assets: path.join(base, "assets"),
-            state: path.join(base, "state"),
+            assets: sharedContentBase,
+            state: path.join(stateBase, "state"),
         };
     }
 
