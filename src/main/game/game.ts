@@ -9,6 +9,7 @@ import { Signal } from "$/jaz-ts-utils/signal";
 import * as path from "path";
 
 import { engineContentAPI } from "@main/content/engine/engine-content";
+import { buildMacOsEngineEnv } from "@main/game/macos-engine-env";
 import { applyDefaultSpringsettings } from "@main/game/springsettings";
 import { startScriptConverter } from "@main/utils/start-script-converter";
 import { logger } from "@main/utils/logger";
@@ -105,6 +106,9 @@ export class GameAPI {
                     env: {
                         ...process.env,
                         SPRING_DATADIR: getAssetsPath(), // Engine will read from both the assets and write dir
+                        // The bundled macOS engine needs its Mesa/Vulkan stack
+                        // wired up at launch; on other platforms this is empty.
+                        ...(process.platform === "darwin" ? buildMacOsEngineEnv(enginePath) : {}),
                     },
                 });
                 if (!this.gameProcess.stdout || !this.gameProcess.stderr) throw new Error("failed to access game process stream");
