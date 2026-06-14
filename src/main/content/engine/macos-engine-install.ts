@@ -8,6 +8,7 @@ import os from "os";
 import path from "path";
 
 import { getAssetsPath } from "@main/config/app";
+import { DEFAULT_ENGINE_VERSION } from "@main/config/default-versions";
 import { logger } from "@main/utils/logger";
 
 const log = logger("macos-engine-install.ts");
@@ -22,13 +23,13 @@ const ENGINE_RELEASE_OWNER = "ExaDev";
 const ENGINE_RELEASE_REPO = "RecoilEngine";
 
 /**
- * Tag and asset name prefix for the Apple Silicon engine build. We pick the most
- * recently published release whose tag starts with this and that carries a
- * matching `.tar.gz` asset.
+ * Tag and asset name prefix for the Apple Silicon engine build. Candidates are
+ * releases whose tag starts with this and that carry a matching `.tar.gz`
+ * asset; resolveEngineAsset then prefers the one matching DEFAULT_ENGINE_VERSION.
  */
 const ENGINE_ASSET_PREFIX = "engine-macos-arm64-";
 
-/** How many recent releases to scan when resolving the latest matching build. */
+/** How many recent releases to scan when resolving the matching build. */
 const RELEASE_LIST_PAGE_SIZE = 30;
 
 interface GitHubReleaseAsset {
@@ -80,15 +81,28 @@ async function mergeDir(src: string, dest: string): Promise<void> {
     }
 }
 
+interface EngineAssetCandidate {
+    tag: string;
+    publishedAt: string;
+    assetName: string;
+    url: string;
+}
+
 /**
- * Resolve the download URL for the latest macOS engine release asset.
+ * Resolve the download URL for the macOS engine release asset to install.
  *
- * Queries the public GitHub releases list (token-free) and selects the most
- * recently published release whose tag starts with `engine-macos-arm64-` and
- * that carries a matching `.tar.gz` asset. We sort by `published_at` rather than
- * trusting list order so the newest engine build always wins.
+ * The lobby installs whatever it downloads as DEFAULT_ENGINE_VERSION, so the
+ * download must correspond to that version rather than to whichever build was
+ * published most recently. Always grabbing the newest release races the pinned
+ * default: a freshly published engine would be installed under the default
+ * version's directory name, mismatching the version the lobby actually runs.
+ *
+ * Queries the public GitHub releases list (token-free) and selects a release
+ * whose tag or asset name carries DEFAULT_ENGINE_VERSION. Only when no such
+ * release exists does it fall back to the most recently published matching
+ * build, logging a clear warning so the version mismatch is visible.
  */
-async function resolveLatestEngineAsset(): Promise<{ tag: string; assetName: string; url: string }> {
+async function resolveEngineAsset(): Promise<{ tag: string; assetName: string; url: string }> {
     const apiUrl = `https://api.github.com/repos/${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO}/releases?per_page=${RELEASE_LIST_PAGE_SIZE}`;
     const response = await fetch(apiUrl, {
         headers: {
@@ -106,19 +120,30 @@ async function resolveLatestEngineAsset(): Promise<{ tag: string; assetName: str
         throw new Error("Unexpected GitHub releases response shape while resolving the macOS engine asset");
     }
 
-    const candidates = body
+    const candidates: EngineAssetCandidate[] = body
         .filter((release) => release.tag_name.startsWith(ENGINE_ASSET_PREFIX))
         .map((release) => {
             const asset = release.assets.find((a) => a.name.startsWith(ENGINE_ASSET_PREFIX) && a.name.endsWith(".tar.gz"));
             return asset ? { tag: release.tag_name, publishedAt: release.published_at, assetName: asset.name, url: asset.browser_download_url } : undefined;
         })
-        .filter((candidate): candidate is { tag: string; publishedAt: string; assetName: string; url: string } => candidate !== undefined)
+        .filter((candidate): candidate is EngineAssetCandidate => candidate !== undefined)
         .sort((a, b) => b.publishedAt.localeCompare(a.publishedAt));
 
-    const latest = candidates[0];
-    if (latest === undefined) {
+    if (candidates.length === 0) {
         throw new Error(`No ${ENGINE_ASSET_PREFIX}*.tar.gz release asset found on ${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO}`);
     }
+
+    const pinned = candidates.find((candidate) => candidate.tag.includes(DEFAULT_ENGINE_VERSION) || candidate.assetName.includes(DEFAULT_ENGINE_VERSION));
+    if (pinned !== undefined) {
+        return { tag: pinned.tag, assetName: pinned.assetName, url: pinned.url };
+    }
+
+    const latest = candidates[0];
+    log.warn(
+        `No ${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO} release matched DEFAULT_ENGINE_VERSION ${DEFAULT_ENGINE_VERSION}; ` +
+            `falling back to most recently published build ${latest.tag} (${latest.assetName}). ` +
+            "The installed engine will be recorded as the default version but may not match it."
+    );
     return { tag: latest.tag, assetName: latest.assetName, url: latest.url };
 }
 
@@ -159,9 +184,11 @@ function extractTarGz(archivePath: string, destDir: string): Promise<void> {
  * Ensure the macOS engine is installed into the given version directory.
  *
  * The engine is no longer bundled inside the app. On first run, if it is not
- * already present in the shared content store, this downloads the latest
- * `engine-macos-arm64-*.tar.gz` release asset from the public ExaDev/RecoilEngine
- * repository (token-free) and unpacks it into the version dir.
+ * already present in the shared content store, this downloads the
+ * `engine-macos-arm64-*.tar.gz` release asset matching DEFAULT_ENGINE_VERSION
+ * from the public ExaDev/RecoilEngine repository (token-free) and unpacks it
+ * into the version dir, falling back to the latest build only when no release
+ * matches (see resolveEngineAsset).
  *
  * The release tarball ships as `bin/spring`, `lib/`, `share/` and (optionally)
  * `game/`. The lobby's engine model expects the binary at the version-dir root
@@ -189,7 +216,7 @@ export async function ensureMacEngine(versionDir: string): Promise<void> {
         return;
     }
 
-    const asset = await resolveLatestEngineAsset();
+    const asset = await resolveEngineAsset();
     log.info(`Downloading macOS engine ${asset.tag} (${asset.assetName}) from ${asset.url}`);
 
     // Stage the download and extraction in a temp dir so a failure mid-extract
