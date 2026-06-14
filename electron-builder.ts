@@ -24,7 +24,15 @@ const config: Configuration = {
     // Explicit owner/repo: without it electron-builder infers the target from
     // package.json's repository field, which still points at the upstream
     // beyond-all-reason/bar-lobby, so releases 403'd against the wrong repo.
-    publish: { provider: "github", owner: "ExaDev", repo: "bar-lobby" },
+    // releaseType: electron-builder defaults to "draft", which isn't downloadable
+    // anonymously (so the cask can't consume it). Publish branch auto-releases as
+    // prereleases and deliberate v* tags as full releases.
+    publish: {
+        provider: "github",
+        owner: "ExaDev",
+        repo: "bar-lobby",
+        releaseType: process.env["GITHUB_REF_TYPE"] === "tag" ? "release" : "prerelease",
+    },
     fileAssociations: [
         {
             ext: "sdfz",
