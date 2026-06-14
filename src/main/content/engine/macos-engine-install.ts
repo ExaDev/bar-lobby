@@ -9,6 +9,7 @@ import path from "path";
 
 import { getAssetsPath } from "@main/config/app";
 import { DEFAULT_ENGINE_VERSION } from "@main/config/default-versions";
+import { acquireSharedStoreLock } from "@main/content/engine/shared-store-lock";
 import { logger } from "@main/utils/logger";
 
 const log = logger("macos-engine-install.ts");
@@ -238,40 +239,52 @@ export async function ensureMacEngine(versionDir: string): Promise<void> {
         }
 
         log.info(`Installing macOS engine from ${extractDir} into ${versionDir}`);
-        await fs.promises.mkdir(versionDir, { recursive: true });
 
-        // Normalise the layout: every binary in bin/ (spring, pr-downloader, and
-        // any others such as spring-headless) goes to the version-dir root, with
-        // lib/ and share/ as siblings, matching the Linux archive the lobby's
-        // paths assume.
-        for (const entry of await fs.promises.readdir(bundledBinDir)) {
-            const dest = path.join(versionDir, entry);
-            await fs.promises.cp(path.join(bundledBinDir, entry), dest, { recursive: true, verbatimSymlinks: true });
-            await fs.promises.chmod(dest, 0o755);
+        // Everything below writes into the shared content store (the version dir
+        // under getEnginePath(), and the game payload merged into getAssetsPath()).
+        // The lobby and chobby share that store with no kernel-level lock, so take
+        // the advisory write lock around the whole install and release it in the
+        // nested finally. The download/extract above stages into a temp dir and
+        // does not touch the store, so it stays outside the lock.
+        const releaseLock = await acquireSharedStoreLock();
+        try {
+            await fs.promises.mkdir(versionDir, { recursive: true });
+
+            // Normalise the layout: every binary in bin/ (spring, pr-downloader, and
+            // any others such as spring-headless) goes to the version-dir root, with
+            // lib/ and share/ as siblings, matching the Linux archive the lobby's
+            // paths assume.
+            for (const entry of await fs.promises.readdir(bundledBinDir)) {
+                const dest = path.join(versionDir, entry);
+                await fs.promises.cp(path.join(bundledBinDir, entry), dest, { recursive: true, verbatimSymlinks: true });
+                await fs.promises.chmod(dest, 0o755);
+            }
+            // verbatimSymlinks keeps the unversioned dylib links relative (e.g.
+            // libvulkan.dylib -> libvulkan.1.dylib). Without it, Node's cp resolves
+            // them to absolute paths in the staging dir, breaking the version dir's
+            // self-containment the moment the staging dir is removed.
+            await fs.promises.cp(path.join(extractDir, "lib"), path.join(versionDir, "lib"), { recursive: true, verbatimSymlinks: true });
+            await fs.promises.cp(path.join(extractDir, "share"), path.join(versionDir, "share"), { recursive: true, verbatimSymlinks: true });
+
+            // Some engine layouts ship AI definitions alongside the binary; copy them
+            // through if present so parseAis finds <versionDir>/AI/Skirmish as on Linux.
+            const bundledAi = path.join(extractDir, "AI");
+            if (await pathExists(bundledAi)) {
+                await fs.promises.cp(bundledAi, path.join(versionDir, "AI"), { recursive: true, verbatimSymlinks: true });
+            }
+
+            // Fold the optional bundled game payload (games, fonts, chobby_config.json)
+            // into the assets dir, matching the paths getGamePaths() reads from. When
+            // the asset omits game content the lobby downloads it via pr-downloader.
+            const bundledGame = path.join(extractDir, "game");
+            if (await pathExists(bundledGame)) {
+                await mergeDir(bundledGame, getAssetsPath());
+            }
+
+            log.info(`Installed macOS engine ${asset.tag} into ${versionDir}`);
+        } finally {
+            await releaseLock();
         }
-        // verbatimSymlinks keeps the unversioned dylib links relative (e.g.
-        // libvulkan.dylib -> libvulkan.1.dylib). Without it, Node's cp resolves
-        // them to absolute paths in the staging dir, breaking the version dir's
-        // self-containment the moment the staging dir is removed.
-        await fs.promises.cp(path.join(extractDir, "lib"), path.join(versionDir, "lib"), { recursive: true, verbatimSymlinks: true });
-        await fs.promises.cp(path.join(extractDir, "share"), path.join(versionDir, "share"), { recursive: true, verbatimSymlinks: true });
-
-        // Some engine layouts ship AI definitions alongside the binary; copy them
-        // through if present so parseAis finds <versionDir>/AI/Skirmish as on Linux.
-        const bundledAi = path.join(extractDir, "AI");
-        if (await pathExists(bundledAi)) {
-            await fs.promises.cp(bundledAi, path.join(versionDir, "AI"), { recursive: true, verbatimSymlinks: true });
-        }
-
-        // Fold the optional bundled game payload (games, fonts, chobby_config.json)
-        // into the assets dir, matching the paths getGamePaths() reads from. When
-        // the asset omits game content the lobby downloads it via pr-downloader.
-        const bundledGame = path.join(extractDir, "game");
-        if (await pathExists(bundledGame)) {
-            await mergeDir(bundledGame, getAssetsPath());
-        }
-
-        log.info(`Installed macOS engine ${asset.tag} into ${versionDir}`);
     } finally {
         await fs.promises.rm(stagingDir, { recursive: true, force: true });
     }
