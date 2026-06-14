@@ -94,3 +94,24 @@ jobs:
                   APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
                   APPLE_ID: ${{ secrets.APPLE_ID }}
                   APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
+
+            # Nudge the Homebrew tap to bump the bar-lobby cask immediately. The
+            # tap also polls on a schedule, so this only makes the update instant.
+            # Needs HOMEBREW_TAP_TOKEN (a PAT with contents:write on
+            # ExaDev/homebrew-bar); inert without it (the scheduled poll covers it).
+            - name: Notify Homebrew tap of release
+              if: runner.os == 'macOS'
+              env:
+                  HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+              run: |
+                  set -euo pipefail
+                  if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
+                    echo "HOMEBREW_TAP_TOKEN not set; the tap's scheduled poll will pick up this release."
+                    exit 0
+                  fi
+                  curl -fsSL -X POST \
+                    -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
+                    -H "Accept: application/vnd.github+json" \
+                    "https://api.github.com/repos/ExaDev/homebrew-bar/dispatches" \
+                    -d '{"event_type":"bar-lobby-release"}'
+                  echo "Dispatched bar-lobby-release to ExaDev/homebrew-bar"
