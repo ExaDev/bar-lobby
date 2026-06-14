@@ -19,8 +19,8 @@ permissions:
     contents: write
 
 jobs:
-    # Branch/dispatch pushes release macOS only (the fork's focus; win/linux are
-    # unverified here). A v* tag releases all three platforms.
+    # Branch/dispatch pushes release macOS (DMG) + Linux (AppImage). Windows is
+    # left to deliberate v* tags, which release all three platforms.
     setup:
         runs-on: ubuntu-latest
         outputs:
@@ -31,7 +31,7 @@ jobs:
                   if [ "${{ github.ref_type }}" = "tag" ]; then
                     echo 'matrix={"os":["windows-latest","ubuntu-latest","macos-15"]}' >> "$GITHUB_OUTPUT"
                   else
-                    echo 'matrix={"os":["macos-15"]}' >> "$GITHUB_OUTPUT"
+                    echo 'matrix={"os":["macos-15","ubuntu-latest"]}' >> "$GITHUB_OUTPUT"
                   fi
 
     release:
@@ -113,8 +113,10 @@ jobs:
                     npx electron-builder --publish always
                   else
                     # Auto-release: unique per-push prerelease version so each
-                    # push creates its own GitHub release (tag v<version>).
-                    VERSION="$(jq -r .version package.json)-macos.${{ github.run_number }}"
+                    # push creates its own GitHub release (tag v<version>). The
+                    # macOS and Linux matrix legs share the version, so both
+                    # assets land on the same release.
+                    VERSION="$(jq -r .version package.json)-dev.${{ github.run_number }}"
                     echo "Auto-release version: $VERSION"
                     npx electron-builder --publish always -c.extraMetadata.version="$VERSION"
                   fi
