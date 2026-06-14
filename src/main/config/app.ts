@@ -126,6 +126,75 @@ export function getAssetsPath() {
     return ASSETS_PATH;
 }
 
+/**
+ * The macOS assets/content directory used before the move to the shared chobby
+ * store. Existing users have their engine plus multi-GB pool/maps/games tree
+ * under this path; on upgrade it must be migrated into SHARED_CONTENT_NAME
+ * rather than re-downloaded from scratch. See migrateMacAssetsToSharedStore.
+ */
+const LEGACY_MACOS_ASSETS_PATH = path.join(homedir(), "Library", "Application Support", APP_NAME, "assets");
+
+/**
+ * One-time migration for the macOS shared-store move.
+ *
+ * Earlier macOS builds kept downloaded content (engine, pool, maps, games)
+ * under `~/Library/Application Support/BeyondAllReason/assets`. The shared store
+ * move relocated that to `~/Library/Application Support/Beyond All Reason`. On
+ * the first launch after upgrade an existing user would otherwise find an empty
+ * shared store and silently re-download multiple GB, abandoning their existing
+ * content. This moves the legacy tree into the shared store instead.
+ *
+ * Only runs when ALL of the following hold, so it never touches a deliberate
+ * user choice and never overwrites an already-populated shared store:
+ * - platform is darwin;
+ * - the user has NOT set a custom assets path (a custom path is left untouched);
+ * - the legacy default dir exists;
+ * - the shared store does not yet exist.
+ *
+ * Idempotent: once the shared store exists (because a previous run moved it, or
+ * because content was downloaded fresh) this is a no-op. A failed move fails
+ * loudly rather than falling through to a silent multi-GB re-download.
+ *
+ * @param hasCustomAssetsPath Whether the user has configured a non-default
+ *   assets path (settings or BAR_ASSETS_PATH). When true, no migration occurs.
+ */
+export async function migrateMacAssetsToSharedStore(hasCustomAssetsPath: boolean): Promise<void> {
+    if (process.platform !== "darwin") {
+        return;
+    }
+    if (hasCustomAssetsPath) {
+        console.log("Custom assets path set; skipping legacy macOS assets migration");
+        return;
+    }
+
+    const sharedStore = path.join(homedir(), "Library", "Application Support", SHARED_CONTENT_NAME);
+
+    const legacyExists = fs.existsSync(LEGACY_MACOS_ASSETS_PATH);
+    const sharedExists = fs.existsSync(sharedStore);
+
+    if (!legacyExists) {
+        return;
+    }
+    if (sharedExists) {
+        console.log(`Shared content store already exists at ${sharedStore}; leaving legacy assets at ${LEGACY_MACOS_ASSETS_PATH} untouched`);
+        return;
+    }
+
+    console.log(`Migrating legacy macOS assets from ${LEGACY_MACOS_ASSETS_PATH} to shared store ${sharedStore}`);
+    await fs.promises.mkdir(path.dirname(sharedStore), { recursive: true });
+    try {
+        await fs.promises.rename(LEGACY_MACOS_ASSETS_PATH, sharedStore);
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(
+            `Failed to migrate legacy macOS assets from ${LEGACY_MACOS_ASSETS_PATH} to ${sharedStore}: ${reason}. ` +
+                "Refusing to continue, as proceeding would silently re-download multiple GB of engine and content. " +
+                "Move the directory manually and relaunch."
+        );
+    }
+    console.log(`Migrated legacy macOS assets into shared store ${sharedStore}`);
+}
+
 const defaultLocations = getDefaultLocations();
 // Allow overriding the paths using env variables.
 let ASSETS_PATH: string = path.resolve(process.env.BAR_ASSETS_PATH || defaultLocations.assets);

@@ -25,7 +25,7 @@ import engineService from "./services/engine.service";
 import mapsService from "./services/maps.service";
 import gameService from "./services/game.service";
 import { logger } from "./utils/logger";
-import { APP_NAME, SCENARIO_IMAGE_PATH, setAssetsPath } from "./config/app";
+import { APP_NAME, SCENARIO_IMAGE_PATH, setAssetsPath, migrateMacAssetsToSharedStore } from "./config/app";
 import { shellService } from "@main/services/shell.service";
 import downloadsService from "@main/services/downloads.service";
 import replaysService from "@main/services/replays.service";
@@ -136,6 +136,13 @@ app.whenReady().then(async () => {
     if (savedAssetsPath && !process.env.BAR_ASSETS_PATH) {
         setAssetsPath(savedAssetsPath);
     }
+    // On the first macOS launch after the shared-store move, fold the legacy
+    // assets tree into the shared store instead of silently re-downloading
+    // multiple GB of engine and content. A custom assets path (settings or
+    // BAR_ASSETS_PATH) is left untouched. Must run before engineService.init(),
+    // which reads from the (possibly just-migrated) shared store.
+    const hasCustomAssetsPath = Boolean(savedAssetsPath) || Boolean(process.env.BAR_ASSETS_PATH);
+    await migrateMacAssetsToSharedStore(hasCustomAssetsPath);
     await engineService.init();
     await Promise.all([accountService.init(), replaysService.init(), gameService.init(), mapsService.init(), autoUpdaterService.init()]);
 
