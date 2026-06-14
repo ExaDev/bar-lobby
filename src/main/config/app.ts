@@ -78,6 +78,17 @@ function getDefaultLocations(): { state: string; assets: string } {
             state: path.join(xdgStateHome, APP_NAME),
         };
     }
+    if (process.platform === "darwin") {
+        // macOS has no separate state vs data split that the engine respects,
+        // so both live under ~/Library/Application Support/<APP_NAME>. State
+        // sits at the app-support root to line up with the `userData` path
+        // Electron itself uses (set via app.setPath("userData", …) below).
+        const appSupport = path.join(homedir(), "Library", "Application Support");
+        return {
+            assets: path.join(appSupport, APP_NAME, "assets"),
+            state: path.join(appSupport, APP_NAME),
+        };
+    }
 
     console.error("Unsupported platform");
     process.exit(1);
