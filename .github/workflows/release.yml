@@ -46,50 +46,11 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            # Fetch the engine from ExaDev/RecoilEngine pinned by tag in
-            # buildResources/engine-release.txt. That file is written by
-            # RecoilEngine's macos-build-gpu.yml (bump-lobby job) via a deploy
-            # key on each engine build, so the lobby tracks an explicit engine
-            # version — no "latest" race. Both repos are public, so the default
-            # GITHUB_TOKEN reads the release asset; no PAT.
-            - name: Download engine release asset from ExaDev/RecoilEngine
-              if: runner.os == 'macOS'
-              env:
-                  GH_TOKEN: ${{ github.token }}
-              run: |
-                  set -euo pipefail
-                  mkdir -p /tmp/engine-artifact
-                  TAG="$(tr -d '[:space:]' < buildResources/engine-release.txt)"
-                  if [ -z "$TAG" ]; then
-                    echo "::error::buildResources/engine-release.txt is empty or missing"
-                    exit 1
-                  fi
-                  echo "Using pinned engine release $TAG"
-                  gh release download "$TAG" --repo ExaDev/RecoilEngine \
-                    --pattern 'engine-macos-arm64-*.tar.gz' --dir /tmp/engine-artifact
-
-            - name: Stage bundled macOS engine
-              if: runner.os == 'macOS'
-              run: |
-                  set -euo pipefail
-                  DEST="buildResources/engine-macos"
-                  find "$DEST" -mindepth 1 ! -name 'README.md' -delete
-                  TARBALL=$(ls /tmp/engine-artifact/engine-macos-arm64-*.tar.gz 2>/dev/null | head -1)
-                  if [ -z "$TARBALL" ]; then
-                    echo "::error::engine-macos-arm64 tarball not found in downloaded artifact"
-                    exit 1
-                  fi
-                  tar -xzf "$TARBALL" -C "$DEST"
-                  echo "Engine artifact staged:"
-                  find "$DEST" -not -name 'README.md' | sort | head -40
-                  for required in bin/spring bin/spring-headless bin/pr-downloader \
-                                  lib game/fonts/FreeSansBold.otf \
-                                  game/games/springcontent.sdz \
-                                  share/vulkan/icd.d/kosmickrisp.json; do
-                    [ -e "$DEST/$required" ] || \
-                      { echo "::error::Missing required artifact file: $DEST/$required"; exit 1; }
-                  done
-                  echo "All required engine files present"
+            # The patched macOS engine is no longer bundled into the DMG. The
+            # lobby downloads the latest engine-macos-arm64 release from the
+            # public ExaDev/RecoilEngine repo on first run (see
+            # src/main/content/engine/macos-engine-install.ts), so there is no
+            # engine download/stage step here any more.
 
             - name: Electron Build & Publish
               shell: bash

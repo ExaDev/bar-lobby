@@ -42,60 +42,11 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            # Fetch the engine from ExaDev/RecoilEngine's latest GitHub Release
-            # (published by macos-build-gpu.yml on push to main) and unpack it
-            # into buildResources/engine-macos/ so electron-builder bundles it.
-            #
-            # Both repos are public, so release assets are readable with the
-            # default GITHUB_TOKEN — no PAT / RECOIL_ENGINE_TOKEN secret needed
-            # (unlike cross-repo *artifacts*, which require actions:read).
-            - name: Download engine release asset from ExaDev/RecoilEngine
-              if: matrix.system.target == 'macos-arm64'
-              env:
-                  GH_TOKEN: ${{ github.token }}
-              run: |
-                  set -euo pipefail
-                  mkdir -p /tmp/engine-artifact
-                  # Latest release whose tag is one of our engine artifacts
-                  # (the repo also carries unrelated BAR release tags).
-                  TAG=$(gh release list --repo ExaDev/RecoilEngine --limit 50 \
-                    --json tagName,createdAt \
-                    --jq '[.[] | select(.tagName | startswith("engine-macos-arm64-"))]
-                          | sort_by(.createdAt) | reverse | .[0].tagName')
-                  if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
-                    echo "::error::No engine-macos-arm64-* release found on ExaDev/RecoilEngine"
-                    exit 1
-                  fi
-                  echo "Using engine release $TAG"
-                  gh release download "$TAG" --repo ExaDev/RecoilEngine \
-                    --pattern 'engine-macos-arm64-*.tar.gz' --dir /tmp/engine-artifact
-
-            - name: Stage bundled macOS engine
-              if: matrix.system.target == 'macos-arm64'
-              run: |
-                  set -euo pipefail
-                  DEST="buildResources/engine-macos"
-                  # buildResources/engine-macos/ is gitignored (only README is
-                  # tracked). Clear any stale content from a previous run then
-                  # unpack the engine tarball into place.
-                  find "$DEST" -mindepth 1 ! -name 'README.md' -delete
-                  TARBALL=$(ls /tmp/engine-artifact/engine-macos-arm64-*.tar.gz 2>/dev/null | head -1)
-                  if [ -z "$TARBALL" ]; then
-                    echo "::error::engine-macos-arm64 tarball not found in downloaded artifact"
-                    exit 1
-                  fi
-                  tar -xzf "$TARBALL" -C "$DEST"
-                  echo "Engine artifact staged:"
-                  find "$DEST" -not -name 'README.md' | sort | head -40
-                  # Verify the minimum required files are present.
-                  for required in bin/spring bin/spring-headless bin/pr-downloader \
-                                  lib game/fonts/FreeSansBold.otf \
-                                  game/games/springcontent.sdz \
-                                  share/vulkan/icd.d/kosmickrisp.json; do
-                    [ -e "$DEST/$required" ] || \
-                      { echo "::error::Missing required artifact file: $DEST/$required"; exit 1; }
-                  done
-                  echo "All required engine files present"
+            # The patched macOS engine is no longer bundled into the DMG. The
+            # lobby downloads the latest engine-macos-arm64 release from the
+            # public ExaDev/RecoilEngine repo on first run (see
+            # src/main/content/engine/macos-engine-install.ts), so there is no
+            # engine download/stage step here any more.
 
             - name: Electron Build
               run: |
