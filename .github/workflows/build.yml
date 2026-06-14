@@ -42,17 +42,76 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            # The macOS build bundles a patched engine instead of fetching it
-            # from the CDN. Stage it into buildResources/engine-macos before the
-            # electron build. TODO: wire this up to the real ExaDev engine
-            # artifact (cross-repo download-artifact or a published release
-            # asset); until then the macOS job fails fast here rather than
-            # producing a DMG with no engine.
+            # Fetch the engine artifact produced by ExaDev/RecoilEngine's
+            # macos-build-gpu.yml (push to macos-port) and unpack it into
+            # buildResources/engine-macos/ so electron-builder can bundle it.
+            #
+            # actions/download-artifact@v4 supports cross-repo download via the
+            # github-token + repository + run-id inputs. We look up the latest
+            # successful run on the macos-port branch dynamically so we don't
+            # have to hard-pin a run-id.
+            #
+            # Required secret: RECOIL_ENGINE_TOKEN
+            #   A Fine-Grained or Classic PAT with actions:read (and contents:read)
+            #   on ExaDev/RecoilEngine. Store it as a repository secret in
+            #   ExaDev/bar-lobby. The default GITHUB_TOKEN cannot access artifacts
+            #   in a different repository.
+            - name: Resolve latest engine artifact run-id
+              if: matrix.system.target == 'macos-arm64'
+              id: engine-run
+              env:
+                  GH_TOKEN: ${{ secrets.RECOIL_ENGINE_TOKEN }}
+              run: |
+                  # Query the Actions API for the most recent successful run of
+                  # macos-build-gpu.yml on the macos-port branch.
+                  RUN_ID=$(gh api \
+                    "repos/ExaDev/RecoilEngine/actions/workflows/macos-build-gpu.yml/runs" \
+                    --jq '[.workflow_runs[]
+                           | select(.head_branch=="macos-port" and .conclusion=="success")
+                           | .id][0]')
+                  if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
+                    echo "::error::No successful macos-build-gpu.yml run found on ExaDev/RecoilEngine@macos-port"
+                    exit 1
+                  fi
+                  echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
+                  echo "Fetching engine artifact from run $RUN_ID"
+
+            - name: Download engine artifact from ExaDev/RecoilEngine
+              if: matrix.system.target == 'macos-arm64'
+              uses: actions/download-artifact@v4
+              with:
+                  name: engine-macos-arm64
+                  path: /tmp/engine-artifact
+                  github-token: ${{ secrets.RECOIL_ENGINE_TOKEN }}
+                  repository: ExaDev/RecoilEngine
+                  run-id: ${{ steps.engine-run.outputs.run-id }}
+
             - name: Stage bundled macOS engine
               if: matrix.system.target == 'macos-arm64'
               run: |
-                  echo "::error::macOS engine staging not yet wired up - populate buildResources/engine-macos from the ExaDev engine artifact"
-                  exit 1
+                  set -euo pipefail
+                  DEST="buildResources/engine-macos"
+                  # buildResources/engine-macos/ is gitignored (only README is
+                  # tracked). Clear any stale content from a previous run then
+                  # unpack the engine tarball into place.
+                  find "$DEST" -mindepth 1 ! -name 'README.md' -delete
+                  TARBALL=$(ls /tmp/engine-artifact/engine-macos-arm64-*.tar.gz 2>/dev/null | head -1)
+                  if [ -z "$TARBALL" ]; then
+                    echo "::error::engine-macos-arm64 tarball not found in downloaded artifact"
+                    exit 1
+                  fi
+                  tar -xzf "$TARBALL" -C "$DEST"
+                  echo "Engine artifact staged:"
+                  find "$DEST" -not -name 'README.md' | sort | head -40
+                  # Verify the minimum required files are present.
+                  for required in bin/spring bin/spring-headless bin/pr-downloader \
+                                  lib game/fonts/FreeSansBold.otf \
+                                  game/games/springcontent.sdz \
+                                  share/vulkan/icd.d/kosmickrisp.json; do
+                    [ -e "$DEST/$required" ] || \
+                      { echo "::error::Missing required artifact file: $DEST/$required"; exit 1; }
+                  done
+                  echo "All required engine files present"
 
             - name: Electron Build
               run: |
