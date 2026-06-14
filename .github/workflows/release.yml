@@ -130,23 +130,46 @@ jobs:
                   APPLE_ID: ${{ secrets.APPLE_ID }}
                   APPLE_APP_SPECIFIC_PASSWORD: ${{ secrets.APPLE_APP_SPECIFIC_PASSWORD }}
 
-            # Nudge the Homebrew tap to bump the bar-lobby cask immediately. The
-            # tap also polls on a schedule, so this only makes the update instant.
-            # Needs HOMEBREW_TAP_TOKEN (a PAT with contents:write on
-            # ExaDev/homebrew-bar); inert without it (the scheduled poll covers it).
-            - name: Notify Homebrew tap of release
-              if: runner.os == 'macOS'
+    # Push the cask bump straight into the tap via an SSH deploy key (cascade's
+    # pattern): the credential is scoped to homebrew-bar and git-only — no PAT,
+    # no API, no polling. Runs after a successful release; the cask tracks the
+    # macOS DMG that release published.
+    update-cask:
+        needs: release
+        runs-on: ubuntu-latest
+        steps:
+            - name: Checkout tap via SSH deploy key
+              uses: actions/checkout@v6
+              with:
+                  repository: ExaDev/homebrew-bar
+                  ssh-key: ${{ secrets.TAP_DEPLOY_KEY }}
+            - name: Update cask to latest release
               env:
-                  HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+                  GH_TOKEN: ${{ github.token }}
               run: |
                   set -euo pipefail
-                  if [ -z "${HOMEBREW_TAP_TOKEN:-}" ]; then
-                    echo "HOMEBREW_TAP_TOKEN not set; the tap's scheduled poll will pick up this release."
-                    exit 0
-                  fi
-                  curl -fsSL -X POST \
-                    -H "Authorization: Bearer ${HOMEBREW_TAP_TOKEN}" \
-                    -H "Accept: application/vnd.github+json" \
-                    "https://api.github.com/repos/ExaDev/homebrew-bar/dispatches" \
-                    -d '{"event_type":"bar-lobby-release"}'
-                  echo "Dispatched bar-lobby-release to ExaDev/homebrew-bar"
+                  # Latest published (non-draft) bar-lobby release. Sort by
+                  # publishedAt: electron-builder stamps every release's
+                  # created_at with the tag's commit date, so createdAt can't
+                  # order our auto-releases.
+                  TAG=$(gh release list --repo ExaDev/bar-lobby --limit 30 \
+                    --json tagName,isDraft,publishedAt \
+                    --jq '[.[] | select(.isDraft | not) | select(.tagName | startswith("v"))]
+                          | sort_by(.publishedAt) | reverse | .[0].tagName')
+                  VERSION="${TAG#v}"
+                  ASSET="BeyondAllReason-${VERSION}-mac-arm64.dmg"
+                  URL="https://github.com/ExaDev/bar-lobby/releases/download/${TAG}/${ASSET}"
+                  gh release view "$TAG" --repo ExaDev/bar-lobby --json assets \
+                    --jq '.assets[].name' | grep -qx "$ASSET" \
+                    || { echo "::error::$ASSET not on $TAG"; exit 1; }
+                  # --retry covers the CDN propagation window right after publish.
+                  curl -fsSL --retry 6 --retry-delay 5 --retry-all-errors "$URL" -o /tmp/dmg
+                  SHA=$(shasum -a 256 /tmp/dmg | cut -d' ' -f1)
+                  [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256: $SHA"; exit 1; }
+                  sed -i -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/bar-lobby.rb
+                  sed -i -E "s/^  sha256 .*/  sha256 \"${SHA}\"/" Casks/bar-lobby.rb
+                  git config user.name "github-actions[bot]"
+                  git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+                  git add Casks/bar-lobby.rb
+                  git diff --cached --quiet || git commit -m "bar-lobby ${VERSION}"
+                  git push
