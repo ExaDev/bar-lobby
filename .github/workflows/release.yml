@@ -154,11 +154,11 @@ jobs:
                   curl -fsSL --retry 6 --retry-delay 5 --retry-all-errors "$URL" -o /tmp/dmg
                   SHA=$(shasum -a 256 /tmp/dmg | cut -d' ' -f1)
                   [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256: $SHA"; exit 1; }
-                  sed -i -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/bar-lobby.rb
-                  sed -i -E "s/^  sha256 .*/  sha256 \"${SHA}\"/" Casks/bar-lobby.rb
+                  sed -i -E "s/^  version \".*\"/  version \"${VERSION}\"/" Casks/bar.rb
+                  sed -i -E "s/^  sha256 .*/  sha256 \"${SHA}\"/" Casks/bar.rb
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git add Casks/bar-lobby.rb
+                  git add Casks/bar.rb
                   git diff --cached --quiet || git commit -m "bar-lobby ${VERSION}"
                   git push
 
