@@ -65,21 +65,28 @@ async function mergeDir(src: string, dest: string): Promise<void> {
  * mirroring the Linux archive, leaving game.ts, pr-downloader.ts and the AI
  * parsing untouched bar the launch-env injection.
  *
- * The copy is idempotent: it is skipped entirely once `versionDir/spring` exists,
- * so subsequent launches just reuse the discovered version dir.
+ * The copy is idempotent: it is skipped once both `versionDir/spring` and
+ * `versionDir/pr-downloader` exist, so subsequent launches reuse the discovered
+ * version dir while a partial install is still repaired.
  *
  * @param versionDir Absolute path to the engine version directory to populate
  *   (e.g. `<ASSETS_PATH>/engine/<DEFAULT_ENGINE_VERSION>`).
  */
 export async function ensureBundledMacEngine(versionDir: string): Promise<void> {
     const springPath = path.join(versionDir, "spring");
-    if (await pathExists(springPath)) {
+    const prDownloaderPath = path.join(versionDir, "pr-downloader");
+    // Consider the engine installed only when BOTH the engine binary and the
+    // pr-downloader (which the lobby spawns for content downloads) are present,
+    // so a partial or older install missing pr-downloader is repaired on the
+    // next launch rather than silently leaving content downloads broken.
+    if ((await pathExists(springPath)) && (await pathExists(prDownloaderPath))) {
         log.info(`Bundled macOS engine already installed at ${versionDir}`);
         return;
     }
 
     const bundleDir = getBundledEngineDir();
-    const bundledBinary = path.join(bundleDir, "bin", "spring");
+    const bundledBinDir = path.join(bundleDir, "bin");
+    const bundledBinary = path.join(bundledBinDir, "spring");
     if (!(await pathExists(bundledBinary))) {
         throw new Error(`Bundled macOS engine not found at ${bundledBinary}; cannot install engine for macOS`);
     }
@@ -87,8 +94,14 @@ export async function ensureBundledMacEngine(versionDir: string): Promise<void> 
     log.info(`Installing bundled macOS engine from ${bundleDir} into ${versionDir}`);
     await fs.promises.mkdir(versionDir, { recursive: true });
 
-    // Normalise bin/spring -> versionDir/spring, with lib/ and share/ as siblings.
-    await fs.promises.cp(bundledBinary, springPath, { recursive: true });
+    // Normalise the layout: every binary in bin/ (spring, pr-downloader, and any
+    // others such as spring-headless) goes to the version-dir root, with lib/ and
+    // share/ as siblings, matching the Linux archive the lobby's paths assume.
+    for (const entry of await fs.promises.readdir(bundledBinDir)) {
+        const dest = path.join(versionDir, entry);
+        await fs.promises.cp(path.join(bundledBinDir, entry), dest, { recursive: true });
+        await fs.promises.chmod(dest, 0o755);
+    }
     await fs.promises.cp(path.join(bundleDir, "lib"), path.join(versionDir, "lib"), { recursive: true });
     await fs.promises.cp(path.join(bundleDir, "share"), path.join(versionDir, "share"), { recursive: true });
 
@@ -107,6 +120,5 @@ export async function ensureBundledMacEngine(versionDir: string): Promise<void> 
         await mergeDir(bundledGame, getAssetsPath());
     }
 
-    await fs.promises.chmod(springPath, 0o755);
     log.info(`Installed bundled macOS engine into ${versionDir}`);
 }
