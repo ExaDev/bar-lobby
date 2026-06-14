@@ -163,7 +163,7 @@ jobs:
                   git push
 
     # Push the Scoop manifest into the bucket via its own scoped SSH deploy key
-    # (cascade's update-scoop pattern). Regenerates bucket/bar-lobby.json fresh.
+    # (cascade's update-scoop pattern). Regenerates bucket/bar.json fresh.
     update-scoop:
         needs: release
         runs-on: ubuntu-latest
@@ -191,7 +191,7 @@ jobs:
                   curl -fsSL --retry 6 --retry-delay 5 --retry-all-errors "$URL" -o /tmp/win.zip
                   SHA=$(shasum -a 256 /tmp/win.zip | cut -d' ' -f1)
                   [[ "$SHA" =~ ^[0-9a-f]{64}$ ]] || { echo "::error::bad sha256: $SHA"; exit 1; }
-                  cat > bucket/bar-lobby.json <<JSON
+                  cat > bucket/bar.json <<JSON
                   {
                       "version": "${VERSION}",
                       "description": "Beyond All Reason lobby client (bar-lobby)",
@@ -220,9 +220,9 @@ jobs:
                       }
                   }
                   JSON
-                  python3 -c "import json; json.load(open('bucket/bar-lobby.json'))"
+                  python3 -c "import json; json.load(open('bucket/bar.json'))"
                   git config user.name "github-actions[bot]"
                   git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-                  git add bucket/bar-lobby.json
+                  git add bucket/bar.json
                   git diff --cached --quiet || git commit -m "bar-lobby ${VERSION}"
                   git push
