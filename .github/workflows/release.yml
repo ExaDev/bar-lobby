@@ -92,6 +92,7 @@ jobs:
                   echo "All required engine files present"
 
             - name: Electron Build & Publish
+              shell: bash
               run: |
                   set -euo pipefail
                   npm run package
