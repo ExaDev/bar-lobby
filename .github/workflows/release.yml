@@ -36,37 +36,27 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            # Fetch the engine artifact produced by ExaDev/RecoilEngine's
-            # macos-build-gpu.yml on the macos-port branch.
-            # See build.yml for full documentation of the RECOIL_ENGINE_TOKEN
-            # requirement and the cross-repo artifact lookup strategy.
-            - name: Resolve latest engine artifact run-id
+            # Fetch the engine from ExaDev/RecoilEngine's latest GitHub Release
+            # (published by macos-build-gpu.yml on push to main). Both repos are
+            # public, so the default GITHUB_TOKEN reads the release — no PAT.
+            - name: Download engine release asset from ExaDev/RecoilEngine
               if: runner.os == 'macOS'
-              id: engine-run
               env:
-                  GH_TOKEN: ${{ secrets.RECOIL_ENGINE_TOKEN }}
+                  GH_TOKEN: ${{ github.token }}
               run: |
-                  RUN_ID=$(gh api \
-                    "repos/ExaDev/RecoilEngine/actions/workflows/macos-build-gpu.yml/runs" \
-                    --jq '[.workflow_runs[]
-                           | select(.head_branch=="macos-port" and .conclusion=="success")
-                           | .id][0]')
-                  if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-                    echo "::error::No successful macos-build-gpu.yml run found on ExaDev/RecoilEngine@macos-port"
+                  set -euo pipefail
+                  mkdir -p /tmp/engine-artifact
+                  TAG=$(gh release list --repo ExaDev/RecoilEngine --limit 50 \
+                    --json tagName,createdAt \
+                    --jq '[.[] | select(.tagName | startswith("engine-macos-arm64-"))]
+                          | sort_by(.createdAt) | reverse | .[0].tagName')
+                  if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+                    echo "::error::No engine-macos-arm64-* release found on ExaDev/RecoilEngine"
                     exit 1
                   fi
-                  echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
-                  echo "Fetching engine artifact from run $RUN_ID"
-
-            - name: Download engine artifact from ExaDev/RecoilEngine
-              if: runner.os == 'macOS'
-              uses: actions/download-artifact@v4
-              with:
-                  name: engine-macos-arm64
-                  path: /tmp/engine-artifact
-                  github-token: ${{ secrets.RECOIL_ENGINE_TOKEN }}
-                  repository: ExaDev/RecoilEngine
-                  run-id: ${{ steps.engine-run.outputs.run-id }}
+                  echo "Using engine release $TAG"
+                  gh release download "$TAG" --repo ExaDev/RecoilEngine \
+                    --pattern 'engine-macos-arm64-*.tar.gz' --dir /tmp/engine-artifact
 
             - name: Stage bundled macOS engine
               if: runner.os == 'macOS'

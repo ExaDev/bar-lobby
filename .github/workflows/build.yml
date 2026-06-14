@@ -42,49 +42,33 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
-            # Fetch the engine artifact produced by ExaDev/RecoilEngine's
-            # macos-build-gpu.yml (push to macos-port) and unpack it into
-            # buildResources/engine-macos/ so electron-builder can bundle it.
+            # Fetch the engine from ExaDev/RecoilEngine's latest GitHub Release
+            # (published by macos-build-gpu.yml on push to main) and unpack it
+            # into buildResources/engine-macos/ so electron-builder bundles it.
             #
-            # actions/download-artifact@v4 supports cross-repo download via the
-            # github-token + repository + run-id inputs. We look up the latest
-            # successful run on the macos-port branch dynamically so we don't
-            # have to hard-pin a run-id.
-            #
-            # Required secret: RECOIL_ENGINE_TOKEN
-            #   A Fine-Grained or Classic PAT with actions:read (and contents:read)
-            #   on ExaDev/RecoilEngine. Store it as a repository secret in
-            #   ExaDev/bar-lobby. The default GITHUB_TOKEN cannot access artifacts
-            #   in a different repository.
-            - name: Resolve latest engine artifact run-id
+            # Both repos are public, so release assets are readable with the
+            # default GITHUB_TOKEN — no PAT / RECOIL_ENGINE_TOKEN secret needed
+            # (unlike cross-repo *artifacts*, which require actions:read).
+            - name: Download engine release asset from ExaDev/RecoilEngine
               if: matrix.system.target == 'macos-arm64'
-              id: engine-run
               env:
-                  GH_TOKEN: ${{ secrets.RECOIL_ENGINE_TOKEN }}
+                  GH_TOKEN: ${{ github.token }}
               run: |
-                  # Query the Actions API for the most recent successful run of
-                  # macos-build-gpu.yml on the macos-port branch.
-                  RUN_ID=$(gh api \
-                    "repos/ExaDev/RecoilEngine/actions/workflows/macos-build-gpu.yml/runs" \
-                    --jq '[.workflow_runs[]
-                           | select(.head_branch=="macos-port" and .conclusion=="success")
-                           | .id][0]')
-                  if [ -z "$RUN_ID" ] || [ "$RUN_ID" = "null" ]; then
-                    echo "::error::No successful macos-build-gpu.yml run found on ExaDev/RecoilEngine@macos-port"
+                  set -euo pipefail
+                  mkdir -p /tmp/engine-artifact
+                  # Latest release whose tag is one of our engine artifacts
+                  # (the repo also carries unrelated BAR release tags).
+                  TAG=$(gh release list --repo ExaDev/RecoilEngine --limit 50 \
+                    --json tagName,createdAt \
+                    --jq '[.[] | select(.tagName | startswith("engine-macos-arm64-"))]
+                          | sort_by(.createdAt) | reverse | .[0].tagName')
+                  if [ -z "$TAG" ] || [ "$TAG" = "null" ]; then
+                    echo "::error::No engine-macos-arm64-* release found on ExaDev/RecoilEngine"
                     exit 1
                   fi
-                  echo "run-id=$RUN_ID" >> "$GITHUB_OUTPUT"
-                  echo "Fetching engine artifact from run $RUN_ID"
-
-            - name: Download engine artifact from ExaDev/RecoilEngine
-              if: matrix.system.target == 'macos-arm64'
-              uses: actions/download-artifact@v4
-              with:
-                  name: engine-macos-arm64
-                  path: /tmp/engine-artifact
-                  github-token: ${{ secrets.RECOIL_ENGINE_TOKEN }}
-                  repository: ExaDev/RecoilEngine
-                  run-id: ${{ steps.engine-run.outputs.run-id }}
+                  echo "Using engine release $TAG"
+                  gh release download "$TAG" --repo ExaDev/RecoilEngine \
+                    --pattern 'engine-macos-arm64-*.tar.gz' --dir /tmp/engine-artifact
 
             - name: Stage bundled macOS engine
               if: matrix.system.target == 'macos-arm64'
