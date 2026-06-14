@@ -21,7 +21,10 @@ const config: Configuration = {
     directories: { buildResources: "buildResources" },
     asarUnpack: ["resources/**"],
 
-    publish: { provider: "github" },
+    // Explicit owner/repo: without it electron-builder infers the target from
+    // package.json's repository field, which still points at the upstream
+    // beyond-all-reason/bar-lobby, so releases 403'd against the wrong repo.
+    publish: { provider: "github", owner: "ExaDev", repo: "bar-lobby" },
     fileAssociations: [
         {
             ext: "sdfz",

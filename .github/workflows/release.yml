@@ -14,6 +14,10 @@ on:
             - "v*"
     workflow_dispatch:
 
+# electron-builder creates the GitHub Release, which needs write access.
+permissions:
+    contents: write
+
 jobs:
     # Branch/dispatch pushes release macOS only (the fork's focus; win/linux are
     # unverified here). A v* tag releases all three platforms.
