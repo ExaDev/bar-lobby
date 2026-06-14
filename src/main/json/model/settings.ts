@@ -12,13 +12,21 @@ export const settingsSchema = Type.Object({
     sfxVolume: Type.Number({ default: 5, minimum: 0, maximum: 100 }),
     musicVolume: Type.Number({ default: 5, minimum: 0, maximum: 100 }),
     loginAutomatically: Type.Boolean({ default: true }),
-    devMode: Type.Boolean({ default: false }),
+    // Default on in this fork: bar-lobby gates the entire online surface (login,
+    // server status, online routes) behind devMode, so without it there is no way
+    // to reach multiplayer at all. Upstream keeps it false because online play is
+    // unfinished; we enable it so the fork can actually attempt it.
+    devMode: Type.Boolean({ default: true }),
     battlesHideInProgress: Type.Boolean({ default: false }),
     battlesHidePvE: Type.Boolean({ default: false }),
     battlesHideLocked: Type.Boolean({ default: false }),
     battlesHideEmpty: Type.Boolean({ default: true }),
     logUploadUrl: Type.String({ default: "https://log.beyondallreason.dev/" }),
-    lobbyServer: Type.String({ default: "wss://server4.beyondallreason.info" }),
+    // Default to the dev lobby server: the hardcoded OAuth client "generic_lobby"
+    // (config/server.ts) is only registered there, not on production server4/5,
+    // so login can only complete against dev until BAR registers the client on
+    // production.
+    lobbyServer: Type.String({ default: "wss://lobby-server-dev.beyondallreason.dev" }),
     customServerList: Type.Array(Type.String(), { default: [] }),
     endedNormallyFilter: Type.Union([Type.Literal("true"), Type.Literal("false"), Type.Literal("null")], { default: "null" }),
     assetsPath: Type.String({ default: "" }),
