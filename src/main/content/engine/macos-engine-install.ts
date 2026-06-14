@@ -51,7 +51,7 @@ async function mergeDir(src: string, dest: string): Promise<void> {
     await fs.promises.mkdir(dest, { recursive: true });
     const entries = await fs.promises.readdir(src);
     for (const entry of entries) {
-        await fs.promises.cp(path.join(src, entry), path.join(dest, entry), { recursive: true });
+        await fs.promises.cp(path.join(src, entry), path.join(dest, entry), { recursive: true, verbatimSymlinks: true });
     }
 }
 
@@ -99,17 +99,21 @@ export async function ensureBundledMacEngine(versionDir: string): Promise<void> 
     // share/ as siblings, matching the Linux archive the lobby's paths assume.
     for (const entry of await fs.promises.readdir(bundledBinDir)) {
         const dest = path.join(versionDir, entry);
-        await fs.promises.cp(path.join(bundledBinDir, entry), dest, { recursive: true });
+        await fs.promises.cp(path.join(bundledBinDir, entry), dest, { recursive: true, verbatimSymlinks: true });
         await fs.promises.chmod(dest, 0o755);
     }
-    await fs.promises.cp(path.join(bundleDir, "lib"), path.join(versionDir, "lib"), { recursive: true });
-    await fs.promises.cp(path.join(bundleDir, "share"), path.join(versionDir, "share"), { recursive: true });
+    // verbatimSymlinks keeps the unversioned dylib links relative (e.g.
+    // libvulkan.dylib -> libvulkan.1.dylib). Without it, Node's cp resolves
+    // them to absolute paths in the bundle's source dir, breaking the version
+    // dir's self-containment the moment the app is moved.
+    await fs.promises.cp(path.join(bundleDir, "lib"), path.join(versionDir, "lib"), { recursive: true, verbatimSymlinks: true });
+    await fs.promises.cp(path.join(bundleDir, "share"), path.join(versionDir, "share"), { recursive: true, verbatimSymlinks: true });
 
     // Some engine layouts ship AI definitions alongside the binary; copy them
     // through if present so parseAis finds <versionDir>/AI/Skirmish as on Linux.
     const bundledAi = path.join(bundleDir, "AI");
     if (await pathExists(bundledAi)) {
-        await fs.promises.cp(bundledAi, path.join(versionDir, "AI"), { recursive: true });
+        await fs.promises.cp(bundledAi, path.join(versionDir, "AI"), { recursive: true, verbatimSymlinks: true });
     }
 
     // Fold the optional bundled game payload (games, fonts, chobby_config.json)
