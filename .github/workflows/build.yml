@@ -21,6 +21,8 @@ jobs:
                       target: windows-amd64
                     - runs-on: ubuntu-latest
                       target: linux-amd64
+                    - runs-on: macos-15
+                      target: macos-arm64
 
         steps:
             - name: Check out Git repository
@@ -40,6 +42,18 @@ jobs:
             - name: Install dependencies
               run: npm ci
 
+            # The macOS build bundles a patched engine instead of fetching it
+            # from the CDN. Stage it into buildResources/engine-macos before the
+            # electron build. TODO: wire this up to the real ExaDev engine
+            # artifact (cross-repo download-artifact or a published release
+            # asset); until then the macOS job fails fast here rather than
+            # producing a DMG with no engine.
+            - name: Stage bundled macOS engine
+              if: matrix.system.target == 'macos-arm64'
+              run: |
+                  echo "::error::macOS engine staging not yet wired up - populate buildResources/engine-macos from the ExaDev engine artifact"
+                  exit 1
+
             - name: Electron Build
               run: |
                   npm run package
@@ -57,5 +71,6 @@ jobs:
                   path: |
                       dist/*.AppImage
                       dist/*.exe
+                      dist/*.dmg
                   retention-days: 30
                   compression-level: 0 # already compressed
