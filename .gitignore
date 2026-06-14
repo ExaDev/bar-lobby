@@ -7,12 +7,6 @@ dist
 /assets*
 /state*
 
-# Bundled macOS engine tree: large binary payload staged by CI at build time
-# (or pulled from the ExaDev engine artifact). Only the README placeholder is
-# tracked so the expected layout is documented; the binaries are never committed.
-/buildResources/engine-macos/*
-!/buildResources/engine-macos/README.md
-
 # local env files
 .env.local
 .env.*.local

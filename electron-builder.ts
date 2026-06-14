@@ -89,9 +89,9 @@ const config: Configuration = {
         gatekeeperAssess: false,
         // Inert without Apple credentials; see notarizeEnabled above.
         notarize: notarizeEnabled,
-        // Ship the bundled patched engine outside the asar so it lands at
-        // process.resourcesPath/engine-macos for the first-run install copy.
-        extraResources: [{ from: "buildResources/engine-macos", to: "engine-macos" }],
+        // The patched macOS engine is no longer bundled in the DMG: the lobby
+        // downloads the latest engine-macos-arm64 release from the public
+        // ExaDev/RecoilEngine repo on first run (see macos-engine-install.ts).
     },
     dmg: {
         artifactName: "${productName}-${version}-mac-arm64.${ext}",

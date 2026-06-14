@@ -17,7 +17,7 @@ import { getEngineReleaseInfo } from "@main/config/content-sources";
 import { AbstractContentAPI } from "@main/content/abstract-content";
 import { getEnginePath } from "@main/config/app";
 import { DEFAULT_ENGINE_VERSION } from "@main/config/default-versions";
-import { ensureBundledMacEngine } from "@main/content/engine/macos-engine-install";
+import { ensureMacEngine } from "@main/content/engine/macos-engine-install";
 
 const log = logger("engine-content.ts");
 
@@ -85,10 +85,11 @@ export class EngineContentAPI extends AbstractContentAPI<string, EngineVersion> 
                 return;
             }
             if (process.platform === "darwin") {
-                // The macOS engine is bundled with the app rather than fetched
-                // from the CDN: copy it into the version dir and mark it
-                // installed, mirroring the post-extract flow below.
-                await ensureBundledMacEngine(path.join(this.engineDirs, engineVersion));
+                // The macOS engine is not bundled with the app and is not served
+                // by the BAR content CDN: download the latest patched build from
+                // the public ExaDev/RecoilEngine releases into the version dir
+                // and mark it installed, mirroring the post-extract flow below.
+                await ensureMacEngine(path.join(this.engineDirs, engineVersion));
                 await this.downloadComplete({
                     type: "engine",
                     name: engineVersion,

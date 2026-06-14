@@ -12,6 +12,21 @@ import { homedir } from "os";
 // and in workaround in installer.nsh.
 export const APP_NAME = "BeyondAllReason";
 
+// Name of the shared content store used by the chobby launcher. On macOS the
+// engine and downloaded game/maps/pool content live here so the lobby and the
+// chobby launcher share a single copy (chobby uses this exact path). It is
+// deliberately distinct from APP_NAME ("BeyondAllReason"): the lobby keeps its
+// own config/state/logs under APP_NAME, only the bulky shared content moves to
+// SHARED_CONTENT_NAME ("Beyond All Reason", with spaces, matching chobby).
+//
+// CONCURRENT-WRITE CAVEAT: because the lobby and chobby share this store, two
+// processes may write here at once (e.g. both downloading or extracting engine
+// or game content simultaneously). There is no cross-process lock. Running both
+// clients concurrently while either is fetching content can interleave writes
+// and corrupt the shared tree. Treat the shared store as single-writer at a
+// time; do not run a content download in both clients at once.
+export const SHARED_CONTENT_NAME = "Beyond All Reason";
+
 /**
  * The function returns default base directories for the application data.
  *
@@ -79,16 +94,23 @@ function getDefaultLocations(): { state: string; assets: string } {
         };
     }
     if (process.platform === "darwin") {
-        // macOS has no separate state/data roots like XDG, so keep both under
-        // ~/Library/Application Support/<APP_NAME> — but as SIBLINGS, not
-        // nested. validateAssetsPath (paths.service.ts) rejects an assets dir
-        // inside the state dir, so state must not be the parent of assets
-        // (a previous layout put state at the app-support root, which made the
-        // default assets path fail validation and crashed Initial Setup).
-        const base = path.join(homedir(), "Library", "Application Support", APP_NAME);
+        // macOS has no separate state/data roots like XDG. The lobby keeps its
+        // own config/state/logs under ~/Library/Application Support/<APP_NAME>,
+        // but the engine and downloaded game/maps/pool content go into the
+        // SHARED content store at ~/Library/Application Support/<SHARED_CONTENT_NAME>
+        // so the lobby and the chobby launcher share a single copy (chobby uses
+        // this exact path). See the SHARED_CONTENT_NAME concurrent-write caveat.
+        //
+        // The assets dir is the shared store root itself (not a nested "assets"
+        // subdir) because chobby reads engine/games/maps/pool directly under the
+        // store root. validateAssetsPath (paths.service.ts) rejects an assets
+        // dir nested inside the state dir; here the two roots are independent
+        // top-level directories, so that check is satisfied.
+        const stateBase = path.join(homedir(), "Library", "Application Support", APP_NAME);
+        const sharedContentBase = path.join(homedir(), "Library", "Application Support", SHARED_CONTENT_NAME);
         return {
-            assets: path.join(base, "assets"),
-            state: path.join(base, "state"),
+            assets: sharedContentBase,
+            state: path.join(stateBase, "state"),
         };
     }
 
@@ -102,6 +124,75 @@ export function setAssetsPath(p: string) {
 
 export function getAssetsPath() {
     return ASSETS_PATH;
+}
+
+/**
+ * The macOS assets/content directory used before the move to the shared chobby
+ * store. Existing users have their engine plus multi-GB pool/maps/games tree
+ * under this path; on upgrade it must be migrated into SHARED_CONTENT_NAME
+ * rather than re-downloaded from scratch. See migrateMacAssetsToSharedStore.
+ */
+const LEGACY_MACOS_ASSETS_PATH = path.join(homedir(), "Library", "Application Support", APP_NAME, "assets");
+
+/**
+ * One-time migration for the macOS shared-store move.
+ *
+ * Earlier macOS builds kept downloaded content (engine, pool, maps, games)
+ * under `~/Library/Application Support/BeyondAllReason/assets`. The shared store
+ * move relocated that to `~/Library/Application Support/Beyond All Reason`. On
+ * the first launch after upgrade an existing user would otherwise find an empty
+ * shared store and silently re-download multiple GB, abandoning their existing
+ * content. This moves the legacy tree into the shared store instead.
+ *
+ * Only runs when ALL of the following hold, so it never touches a deliberate
+ * user choice and never overwrites an already-populated shared store:
+ * - platform is darwin;
+ * - the user has NOT set a custom assets path (a custom path is left untouched);
+ * - the legacy default dir exists;
+ * - the shared store does not yet exist.
+ *
+ * Idempotent: once the shared store exists (because a previous run moved it, or
+ * because content was downloaded fresh) this is a no-op. A failed move fails
+ * loudly rather than falling through to a silent multi-GB re-download.
+ *
+ * @param hasCustomAssetsPath Whether the user has configured a non-default
+ *   assets path (settings or BAR_ASSETS_PATH). When true, no migration occurs.
+ */
+export async function migrateMacAssetsToSharedStore(hasCustomAssetsPath: boolean): Promise<void> {
+    if (process.platform !== "darwin") {
+        return;
+    }
+    if (hasCustomAssetsPath) {
+        console.log("Custom assets path set; skipping legacy macOS assets migration");
+        return;
+    }
+
+    const sharedStore = path.join(homedir(), "Library", "Application Support", SHARED_CONTENT_NAME);
+
+    const legacyExists = fs.existsSync(LEGACY_MACOS_ASSETS_PATH);
+    const sharedExists = fs.existsSync(sharedStore);
+
+    if (!legacyExists) {
+        return;
+    }
+    if (sharedExists) {
+        console.log(`Shared content store already exists at ${sharedStore}; leaving legacy assets at ${LEGACY_MACOS_ASSETS_PATH} untouched`);
+        return;
+    }
+
+    console.log(`Migrating legacy macOS assets from ${LEGACY_MACOS_ASSETS_PATH} to shared store ${sharedStore}`);
+    await fs.promises.mkdir(path.dirname(sharedStore), { recursive: true });
+    try {
+        await fs.promises.rename(LEGACY_MACOS_ASSETS_PATH, sharedStore);
+    } catch (err) {
+        const reason = err instanceof Error ? err.message : String(err);
+        throw new Error(
+            `Failed to migrate legacy macOS assets from ${LEGACY_MACOS_ASSETS_PATH} to ${sharedStore}: ${reason}. ` +
+                "Refusing to continue, as proceeding would silently re-download multiple GB of engine and content. " +
+                "Move the directory manually and relaunch."
+        );
+    }
+    console.log(`Migrated legacy macOS assets into shared store ${sharedStore}`);
 }
 
 const defaultLocations = getDefaultLocations();
