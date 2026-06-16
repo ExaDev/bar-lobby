@@ -86,10 +86,11 @@ export class EngineContentAPI extends AbstractContentAPI<string, EngineVersion> 
             }
             if (process.platform === "darwin") {
                 // The macOS engine is not bundled with the app and is not served
-                // by the BAR content CDN: download the latest patched build from
-                // the public ExaDev/RecoilEngine releases into the version dir
-                // and mark it installed, mirroring the post-extract flow below.
-                await ensureMacEngine(path.join(this.engineDirs, engineVersion));
+                // by the BAR content CDN: download the patched build for the
+                // requested version from the public ExaDev/RecoilEngine releases
+                // into the version dir and mark it installed, mirroring the
+                // post-extract flow below.
+                await ensureMacEngine(path.join(this.engineDirs, engineVersion), engineVersion);
                 await this.downloadComplete({
                     type: "engine",
                     name: engineVersion,

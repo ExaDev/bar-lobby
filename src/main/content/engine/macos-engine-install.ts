@@ -8,7 +8,6 @@ import os from "os";
 import path from "path";
 
 import { getAssetsPath } from "@main/config/app";
-import { DEFAULT_ENGINE_VERSION } from "@main/config/default-versions";
 import { acquireSharedStoreLock } from "@main/content/engine/shared-store-lock";
 import { logger } from "@main/utils/logger";
 
@@ -26,7 +25,7 @@ const ENGINE_RELEASE_REPO = "RecoilEngine";
 /**
  * Tag and asset name prefix for the Apple Silicon engine build. Candidates are
  * releases whose tag starts with this and that carry a matching `.tar.gz`
- * asset; resolveEngineAsset then prefers the one matching DEFAULT_ENGINE_VERSION.
+ * asset; resolveEngineAsset then prefers the one matching the requested version.
  */
 const ENGINE_ASSET_PREFIX = "engine-macos-arm64-";
 
@@ -144,18 +143,20 @@ interface EngineAssetCandidate {
 /**
  * Resolve the download URL for the macOS engine release asset to install.
  *
- * The lobby installs whatever it downloads as DEFAULT_ENGINE_VERSION, so the
- * download must correspond to that version rather than to whichever build was
- * published most recently. Always grabbing the newest release races the pinned
- * default: a freshly published engine would be installed under the default
- * version's directory name, mismatching the version the lobby actually runs.
+ * The lobby installs whatever it downloads under the requested version's
+ * directory name, so the download must correspond to that version rather than to
+ * whichever build was published most recently. Always grabbing the newest
+ * release races the caller: an online battle joining a 2026.06.08 autohost would
+ * install the newest build under the 2026.06.08 directory, mismatching the
+ * version the lobby actually runs.
  *
- * Queries the public GitHub releases list (token-free) and selects a release
- * whose tag or asset name carries DEFAULT_ENGINE_VERSION. Only when no such
- * release exists does it fall back to the most recently published matching
- * build, logging a clear warning so the version mismatch is visible.
+ * Queries the public GitHub releases list (token-free) and selects the release
+ * whose tag or asset name carries the requested version, choosing the GPU
+ * variant appropriate to this OS (see pickEngineAsset). Only when no such
+ * release exists does it fall back to the most recently published build, logging
+ * a clear warning so the version mismatch is visible.
  */
-async function resolveEngineAsset(): Promise<{ tag: string; assetName: string; url: string }> {
+async function resolveEngineAsset(engineVersion: string): Promise<{ tag: string; assetName: string; url: string }> {
     const apiUrl = `https://api.github.com/repos/${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO}/releases?per_page=${RELEASE_LIST_PAGE_SIZE}`;
     const response = await fetch(apiUrl, {
         headers: {
@@ -186,16 +187,16 @@ async function resolveEngineAsset(): Promise<{ tag: string; assetName: string; u
         throw new Error(`No ${ENGINE_ASSET_PREFIX}*.tar.gz release asset found on ${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO}`);
     }
 
-    const pinned = candidates.find((candidate) => candidate.tag.includes(DEFAULT_ENGINE_VERSION) || candidate.assetName.includes(DEFAULT_ENGINE_VERSION));
+    const pinned = candidates.find((candidate) => candidate.tag.includes(engineVersion) || candidate.assetName.includes(engineVersion));
     if (pinned !== undefined) {
         return { tag: pinned.tag, assetName: pinned.assetName, url: pinned.url };
     }
 
     const latest = candidates[0];
     log.warn(
-        `No ${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO} release matched DEFAULT_ENGINE_VERSION ${DEFAULT_ENGINE_VERSION}; ` +
+        `No ${ENGINE_RELEASE_OWNER}/${ENGINE_RELEASE_REPO} release matched engine version ${engineVersion}; ` +
             `falling back to most recently published build ${latest.tag} (${latest.assetName}). ` +
-            "The installed engine will be recorded as the default version but may not match it."
+            "The installed engine will be recorded under the requested version directory but may not match it."
     );
     return { tag: latest.tag, assetName: latest.assetName, url: latest.url };
 }
@@ -238,7 +239,7 @@ function extractTarGz(archivePath: string, destDir: string): Promise<void> {
  *
  * The engine is no longer bundled inside the app. On first run, if it is not
  * already present in the shared content store, this downloads the
- * `engine-macos-arm64-*.tar.gz` release asset matching DEFAULT_ENGINE_VERSION
+ * `engine-macos-arm64-*.tar.gz` release asset matching the requested version
  * from the public ExaDev/RecoilEngine repository (token-free) and unpacks it
  * into the version dir, falling back to the latest build only when no release
  * matches (see resolveEngineAsset).
@@ -255,18 +256,20 @@ function extractTarGz(archivePath: string, destDir: string): Promise<void> {
  * version dir while a partial install is still repaired.
  *
  * @param versionDir Absolute path to the engine version directory to populate
- *   (e.g. `<ASSETS_PATH>/engine/<DEFAULT_ENGINE_VERSION>`).
+ *   (e.g. `<ASSETS_PATH>/engine/<engineVersion>`).
  */
-export async function ensureMacEngine(versionDir: string): Promise<void> {
+export async function ensureMacEngine(versionDir: string, engineVersion: string): Promise<void> {
     const springPath = path.join(versionDir, "spring");
     const prDownloaderPath = path.join(versionDir, "pr-downloader");
     const tagFile = path.join(versionDir, ENGINE_TAG_FILE);
 
-    // Resolve the desired asset up front. The asset name encodes the GPU variant,
-    // so comparing it against the installed sidecar detects an OS change (e.g. a
-    // macOS 26 upgrade/downgrade) and re-fetches the correct variant instead of
-    // pinning the user to whatever was first downloaded.
-    const asset = await resolveEngineAsset();
+    // Resolve the desired asset up front, pinned to the requested engine version
+    // (the online battle's autohost version, or the default for singleplayer).
+    // The asset name also encodes the GPU variant, so comparing it against the
+    // installed sidecar detects an OS change (e.g. a macOS 26 upgrade/downgrade)
+    // and re-fetches the correct variant instead of pinning the user to whatever
+    // was first downloaded.
+    const asset = await resolveEngineAsset(engineVersion);
 
     // Consider the engine installed only when BOTH the engine binary and the
     // pr-downloader are present AND the recorded asset name matches the one this

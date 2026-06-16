@@ -14,4 +14,8 @@
 
 export const LATEST = "LATEST";
 export const LATEST_GAME_VERSION = "byar:test";
-export const DEFAULT_ENGINE_VERSION = "2025.06.21";
+// 2025.06.24 is the production engine version the BAR autohosts run and that
+// this fork publishes a macOS build for (ExaDev/RecoilEngine). Kept in sync with
+// the published macOS engine releases so the default/offline engine resolves
+// cleanly instead of falling back to "latest published".
+export const DEFAULT_ENGINE_VERSION = "2025.06.24";
