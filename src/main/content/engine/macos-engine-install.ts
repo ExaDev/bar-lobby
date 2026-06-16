@@ -33,6 +33,58 @@ const ENGINE_ASSET_PREFIX = "engine-macos-arm64-";
 /** How many recent releases to scan when resolving the matching build. */
 const RELEASE_LIST_PAGE_SIZE = 30;
 
+/**
+ * The GPU engine ships in two variants per release: the default KosmicKrisp
+ * build (renders via Metal 4, macOS 26+) and a "-moltenvk" build (renders via
+ * MoltenVK, pre-26). macOS 26 is Darwin 25, so Darwin < 25 must take MoltenVK.
+ */
+function prefersMoltenVK(): boolean {
+    if (process.platform !== "darwin") return false;
+    const major = Number.parseInt(os.release(), 10);
+    return Number.isFinite(major) && major < 25;
+}
+
+function isMoltenVKAsset(name: string): boolean {
+    return name.endsWith("-moltenvk.tar.gz");
+}
+
+/**
+ * Pick the engine tarball asset on a release matching this OS's GPU variant,
+ * falling back to the other variant if the preferred one is absent (a release
+ * may carry only one). Returns undefined if the release has no engine tarball.
+ */
+function pickEngineAsset(release: GitHubRelease): GitHubReleaseAsset | undefined {
+    const tarballs = release.assets.filter((a) => a.name.startsWith(ENGINE_ASSET_PREFIX) && a.name.endsWith(".tar.gz"));
+    if (tarballs.length === 0) {
+        return undefined;
+    }
+    const wantMoltenVK = prefersMoltenVK();
+    const preferred = tarballs.find((a) => isMoltenVKAsset(a.name) === wantMoltenVK);
+    const chosen = preferred ?? tarballs[0];
+    if (preferred === undefined) {
+        log.warn(`No ${wantMoltenVK ? "MoltenVK (pre-26)" : "KosmicKrisp (26+)"} engine asset on ${release.tag_name}; falling back to ${chosen.name}`);
+    } else {
+        log.info(`Selected ${wantMoltenVK ? "MoltenVK (pre-26)" : "KosmicKrisp (26+)"} engine asset on ${release.tag_name}: ${chosen.name}`);
+    }
+    return chosen;
+}
+
+/**
+ * Name of the sidecar file recording which engine asset is installed. Stores the
+ * resolved asset name (which encodes release tag + GPU variant) so an OS change
+ * (e.g. a macOS 26 upgrade/downgrade) is detected and the correct variant is
+ * re-fetched, rather than pinning the user to whatever was first downloaded.
+ */
+const ENGINE_TAG_FILE = ".engine-tag";
+
+async function readInstalledAssetName(tagFile: string): Promise<string | null> {
+    try {
+        return (await fs.promises.readFile(tagFile, "utf8")).trim();
+    } catch {
+        return null;
+    }
+}
+
 interface GitHubReleaseAsset {
     name: string;
     browser_download_url: string;
@@ -124,7 +176,7 @@ async function resolveEngineAsset(): Promise<{ tag: string; assetName: string; u
     const candidates: EngineAssetCandidate[] = body
         .filter((release) => release.tag_name.startsWith(ENGINE_ASSET_PREFIX))
         .map((release) => {
-            const asset = release.assets.find((a) => a.name.startsWith(ENGINE_ASSET_PREFIX) && a.name.endsWith(".tar.gz"));
+            const asset = pickEngineAsset(release);
             return asset ? { tag: release.tag_name, publishedAt: release.published_at, assetName: asset.name, url: asset.browser_download_url } : undefined;
         })
         .filter((candidate): candidate is EngineAssetCandidate => candidate !== undefined)
@@ -208,16 +260,27 @@ function extractTarGz(archivePath: string, destDir: string): Promise<void> {
 export async function ensureMacEngine(versionDir: string): Promise<void> {
     const springPath = path.join(versionDir, "spring");
     const prDownloaderPath = path.join(versionDir, "pr-downloader");
+    const tagFile = path.join(versionDir, ENGINE_TAG_FILE);
+
+    // Resolve the desired asset up front. The asset name encodes the GPU variant,
+    // so comparing it against the installed sidecar detects an OS change (e.g. a
+    // macOS 26 upgrade/downgrade) and re-fetches the correct variant instead of
+    // pinning the user to whatever was first downloaded.
+    const asset = await resolveEngineAsset();
+
     // Consider the engine installed only when BOTH the engine binary and the
-    // pr-downloader (which the lobby spawns for content downloads) are present,
-    // so a partial or older install missing pr-downloader is repaired on the
-    // next launch rather than silently leaving content downloads broken.
-    if ((await pathExists(springPath)) && (await pathExists(prDownloaderPath))) {
-        log.info(`macOS engine already installed at ${versionDir}`);
+    // pr-downloader are present AND the recorded asset name matches the one this
+    // OS now wants -- so a partial/older install is repaired and an OS-level
+    // variant switch triggers a re-download of the right engine.
+    const installedAssetName = await readInstalledAssetName(tagFile);
+    if ((await pathExists(springPath)) && (await pathExists(prDownloaderPath)) && installedAssetName === asset.assetName) {
+        log.info(`macOS engine already installed at ${versionDir} (${asset.assetName})`);
         return;
     }
 
-    const asset = await resolveEngineAsset();
+    if (installedAssetName !== null && installedAssetName !== asset.assetName) {
+        log.info(`Refreshing macOS engine at ${versionDir}: installed ${installedAssetName} -> ${asset.assetName}`);
+    }
     log.info(`Downloading macOS engine ${asset.tag} (${asset.assetName}) from ${asset.url}`);
 
     // Stage the download and extraction in a temp dir so a failure mid-extract
@@ -282,6 +345,10 @@ export async function ensureMacEngine(versionDir: string): Promise<void> {
             }
 
             log.info(`Installed macOS engine ${asset.tag} into ${versionDir}`);
+
+            // Record the asset name so a future launch can detect that the OS now
+            // prefers a different GPU variant and re-fetch (see ensureMacEngine).
+            await fs.promises.writeFile(tagFile, asset.assetName, "utf8");
         } finally {
             await releaseLock();
         }
