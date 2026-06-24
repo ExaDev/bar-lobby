@@ -8,7 +8,13 @@ SPDX-License-Identifier: MIT
     <Modal :title="t('lobby.navbar.serverSettings.title')">
         <div class="gridform">
             <div>{{ t("lobby.navbar.serverSettings.activeServer") }}</div>
-            <Select v-model="settingsStore.lobbyServer" :options="serversList" optionGroupLabel="label" optionGroupChildren="items" />
+            <Select
+                v-model="settingsStore.lobbyServer"
+                :options="serversList"
+                optionGroupLabel="label"
+                optionGroupChildren="items"
+                :optionDisabled="isProductionServer"
+            />
             <div>{{ t("lobby.navbar.serverSettings.customServer") }}</div>
             <Textbox
                 type="text"
@@ -30,6 +36,7 @@ SPDX-License-Identifier: MIT
                 </div>
             </OverlayPanel>
         </div>
+        <div class="margin-md server-notice">{{ t("lobby.navbar.serverSettings.productionServerNotice") }}</div>
         <div class="margin-md">{{ t("lobby.navbar.serverSettings.info") }}</div>
     </Modal>
 </template>
@@ -56,6 +63,17 @@ const defaultServers: string[] = [
     "wss://lobby-server-dev.beyondallreason.dev",
     "ws://localhost:4000",
 ];
+
+// bar-lobby speaks the Tachyon/OAuth2 protocol, which is only available on the dev
+// lobby server. Production servers (server4/5) run the legacy Spring protocol that
+// this client cannot authenticate against, so they're shown disabled rather than
+// removed — for production multiplayer, use the Chobby client instead.
+const DEV_SERVER = "wss://lobby-server-dev.beyondallreason.dev";
+const PRODUCTION_SERVERS = ["wss://server4.beyondallreason.info", "wss://server5.beyondallreason.info"];
+
+function isProductionServer(url: string) {
+    return PRODUCTION_SERVERS.includes(url);
+}
 
 const disableRemoveButton = computed(() => {
     return defaultServers.includes(settingsStore.lobbyServer);
@@ -98,8 +116,9 @@ function addServerToList() {
 function removeServerFromList() {
     const index = settingsStore.customServerList.indexOf(settingsStore.lobbyServer);
     settingsStore.customServerList.splice(index, 1);
-    //Bounce back to the primary default when an entry is deleted
-    settingsStore.lobbyServer = defaultServers[0];
+    //Bounce back to the dev server when an entry is deleted. defaultServers[0] is a
+    //production server, which bar-lobby (Tachyon) cannot authenticate against.
+    settingsStore.lobbyServer = DEV_SERVER;
 }
 </script>
 
@@ -110,5 +129,9 @@ function removeServerFromList() {
 }
 .textbox {
     justify-self: normal;
+}
+.server-notice {
+    color: rgba(255, 255, 255, 0.6);
+    font-size: 0.9em;
 }
 </style>
