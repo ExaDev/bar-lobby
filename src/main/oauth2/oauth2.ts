@@ -18,6 +18,34 @@ interface TokenResponse {
     expiresIn: number;
 }
 
+// Translate an OAuth2 token-endpoint failure into an actionable message. teiserver
+// returns {"error":"invalid_request","error_description":"... no application found
+// for uid ..."} when the client isn't registered on that server — which happens if
+// bar-lobby (Tachyon/OAuth2) is pointed at a production server that only speaks the
+// legacy Spring protocol. Surface that as a clear instruction rather than a raw 400.
+function mapOAuthTokenError(status: number, statusText: string, body: string): string {
+    let error: string | undefined;
+    let errorDescription: string | undefined;
+    try {
+        const parsed = JSON.parse(body);
+        if (parsed != null && typeof parsed === "object") {
+            error = parsed.error;
+            errorDescription = parsed.error_description;
+        }
+    } catch {
+        // Body wasn't valid JSON; leave the error fields undefined.
+    }
+    if (error === "invalid_request" && errorDescription?.match(/no application found/i)) {
+        return (
+            "This lobby server does not support the bar-lobby (Tachyon) client. " +
+            "Production servers use a different protocol — use the Chobby client for " +
+            "production multiplayer, or switch to the dev lobby server in Settings."
+        );
+    }
+    const detail = errorDescription ?? error ?? body;
+    return `Failed to fetch OAuth2 token: ${status} ${statusText}: ${detail}`;
+}
+
 //TODO cache this response according to HTTP cache headers returned from server
 export async function fetchAuthorizationServerMetadata(): Promise<{
     authorizationEndpoint: string;
@@ -99,7 +127,7 @@ export async function authenticate(): Promise<TokenResponse> {
         });
         if (tokenResponse.status !== 200) {
             const responseText = await tokenResponse.text();
-            const error = `Failed to fetch OAuth2 token: ${tokenResponse.status} ${tokenResponse.statusText} ${responseText}`;
+            const error = mapOAuthTokenError(tokenResponse.status, tokenResponse.statusText, responseText);
             log.error(error);
             throw new Error(error);
         }

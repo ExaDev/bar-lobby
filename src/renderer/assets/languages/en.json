@@ -2048,6 +2048,7 @@
                 "add": "Add",
                 "remove": "Remove",
                 "info": "Changing the Active Server has immediate effect. Remember to log in after switching.",
+                "productionServerNotice": "Production servers (server4/5) are disabled in this build — bar-lobby uses the Tachyon protocol, which isn't available there. Use the Chobby client for production multiplayer, or the dev lobby server here.",
                 "labelDefault": " - Default Servers",
                 "labelCustom": " - Custom Servers"
             },
