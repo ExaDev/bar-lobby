@@ -111,6 +111,7 @@ describe("Main Process Lifecycle", () => {
             APP_NAME: "Test App",
             SCENARIO_IMAGE_PATH: "/test/path",
             setAssetsPath: vi.fn(),
+            migrateMacAssetsToSharedStore: vi.fn().mockResolvedValue(undefined),
         }));
 
         // Mock all services
