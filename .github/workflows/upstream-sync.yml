@@ -1,3 +1,7 @@
+# SPDX-FileCopyrightText: 2025 The BAR Lobby Authors
+#
+# SPDX-License-Identifier: CC0-1.0
+
 # Keep this fork current with its upstream. Two phases:
 #   1. Fast-forward the mirror branch (master) to upstream — always safe, it
 #      carries none of our work.
